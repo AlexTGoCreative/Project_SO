@@ -107,6 +107,7 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
     if ((directory = opendir(filename)) == NULL)
     {
         exit(-1);
+        
 
     }
 
