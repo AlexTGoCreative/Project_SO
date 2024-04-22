@@ -100,8 +100,6 @@ void printVersion(int fd, struct stat buffer)
     }
 }
 
-// filename = path
-
 void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
 {
     DIR *directory = NULL;
@@ -109,7 +107,7 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
     if ((directory = opendir(filename)) == NULL)
     {
         exit(-1);
-        
+
     }
 
     char tempFileName[1024];
