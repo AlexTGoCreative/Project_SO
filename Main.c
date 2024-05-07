@@ -9,9 +9,74 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define MaxPerms S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH // Toate permisiunile pentru fisierul snapshot
+#define MAX_PERMISSIONS S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH
+#define MAX_FILE_NAME 100
+#define MAX_MODIFIED_LENGTH 100
+#define MAX_PERMISSIONS_LENGTH 50
+#define MAX_PATH_LENGTH 100
 
-// char globalPath[208] = "/home/alex/TestareSO";
+typedef struct
+{
+
+    dev_t ID;
+    off_t size;
+    time_t modified; // Time of last modification //
+    ino_t inode;
+    mode_t mode;                            // File type and mode //
+    char modifiedChar[MAX_MODIFIED_LENGTH]; // the modified field in human-readable format
+    char permissions[MAX_PERMISSIONS_LENGTH];
+    char path[MAX_PATH_LENGTH];
+} MetaData;
+
+char *permissionToString(mode_t mode)
+{
+    static char perm[10];
+    perm[0] = (mode & S_IRUSR) ? 'r' : '-';
+    perm[1] = (mode & S_IWUSR) ? 'w' : '-';
+    perm[2] = (mode & S_IXUSR) ? 'x' : '-';
+    perm[3] = (mode & S_IRGRP) ? 'r' : '-';
+    perm[4] = (mode & S_IWGRP) ? 'w' : '-';
+    perm[5] = (mode & S_IXGRP) ? 'x' : '-';
+    perm[6] = (mode & S_IROTH) ? 'r' : '-';
+    perm[7] = (mode & S_IWOTH) ? 'w' : '-';
+    perm[8] = (mode & S_IXOTH) ? 'x' : '-';
+    perm[9] = '\0';
+    return perm;
+}
+
+MetaData makeMetaData(char *path)
+{
+    struct stat statData;
+    int data = lstat(path, &statData);
+
+    if (data == -1)
+    {
+        perror("Stat failed\n");
+        exit(-3);
+    }
+
+    MetaData metadata;
+
+    metadata.size = statData.st_size;
+    metadata.modified = statData.st_mtime;
+    metadata.inode = statData.st_ino;
+    metadata.mode = statData.st_mode;
+
+    struct tm *tm_info;
+    tm_info = localtime(&statData.st_mtime);
+    char modified_time_str[26];
+    strftime(modified_time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
+
+    strcpy(metadata.modifiedChar, modified_time_str);
+
+    mode_t permissions = statData.st_mode & 0777;
+    char *permission_str = permissionToString(permissions);
+    strcpy(metadata.permissions, permission_str);
+
+    strcpy(metadata.path, path);
+
+    return metadata;
+}
 
 ino_t get_directory_inode(const char *path)
 {
@@ -54,7 +119,7 @@ int search_file_in_directory(const char *directory_path, const char *filename)
 int Compar_Fisier(int fd, struct stat buffer, int index)
 {
     char data[1024], data1[1024];
-    sprintf(data, "ID: %ld\nI-NODE NUMBER: %ld\nFile TYPE : %d\nNumber of HARDLINKS: %ld\nID OWNER: %d\nID GROUP: %d\nSIZE: %ld\n\n", buffer.st_dev, buffer.st_ino, buffer.st_mode, buffer.st_nlink, buffer.st_uid, buffer.st_gid, buffer.st_size);
+    sprintf(data, "ID: %ld\nI-NODE NUMBER: %ld\nFile TYPE : %d\nNumber of HARDLINKS: %ld\nID OWNER: %d\nID GROUP: %d\nSIZE: %ld\nLAST ACCESS: %ld \n\n", buffer.st_dev, buffer.st_ino, buffer.st_mode, buffer.st_nlink, buffer.st_uid, buffer.st_gid, buffer.st_size, buffer.st_atime);
 
     lseek(fd, index * strlen(data), SEEK_SET);
 
@@ -91,7 +156,7 @@ int verifyName(char *DirectoryName)
 void printVersion(int fd, struct stat buffer)
 {
     char data[1024];
-    sprintf(data, "ID: %ld\nI-NODE NUMBER: %ld\nFile TYPE : %d\nNumber of HARDLINKS: %ld\nID OWNER: %d\nID GROUP: %d\nSIZE: %ld\n\n", buffer.st_dev, buffer.st_ino, buffer.st_mode, buffer.st_nlink, buffer.st_uid, buffer.st_gid, buffer.st_size);
+    sprintf(data, "ID: %ld\nI-NODE NUMBER: %ld\nFile TYPE : %d\nNumber of HARDLINKS: %ld\nID OWNER: %d\nID GROUP: %d\nSIZE: %ld\nLAST ACCESS: %ld \n\n", buffer.st_dev, buffer.st_ino, buffer.st_mode, buffer.st_nlink, buffer.st_uid, buffer.st_gid, buffer.st_size, buffer.st_atime);
 
     if (write(fd, data, strlen(data)) == -1) // verificam output write
     {
@@ -107,8 +172,6 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
     if ((directory = opendir(filename)) == NULL)
     {
         exit(-1);
-        
-
     }
 
     char tempFileName[1024];
@@ -123,7 +186,7 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
         sprintf(path_check, "%ld_Snapshots.txt", get_directory_inode(filename));
         if (search_file_in_directory(pathSnap, path_check) == 0)
         {
-            if ((fd = open(path, O_WRONLY | O_APPEND | O_CREAT, MaxPerms)) == -1) // verfic file descriptor-ul
+            if ((fd = open(path, O_WRONLY | O_APPEND | O_CREAT, MAX_PERMISSIONS)) == -1) // verfic file descriptor-ul
             {
                 perror("Files could not be created\n");
                 exit(EXIT_FAILURE);
@@ -153,8 +216,6 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
                 exit(-1);
             }
 
-            // daca e se poate cu append deschis
-
             printVersion(fd, buffer); // scrie in fisier, deja e deschis "sanpshot-ul pentru scriere"
 
             if (close(fd) == -1)
@@ -163,7 +224,6 @@ void treeSINGLE(char *filename, char *pathSnap) // versiunea cu un singur fisier
                 exit(-3);
             }
         }
-
         else
         {
             if ((fd = open(path, O_RDWR | O_APPEND)) == -1) // verfic file descriptor-ul
@@ -253,10 +313,9 @@ int main(int argc, char *argv[])
     return 0;
 }*/
 
-
-int main(int argc, char *argv[])
+void SnapShot(int argc, char *argv[])
 {
-    char pathSnapshot[208];
+    char pathSnapshot[208], pathMalware[208];
     if (argc < 4)
     {
         perror("Not enough arguments!\n");
@@ -268,8 +327,11 @@ int main(int argc, char *argv[])
     {
         if (strcmp("-o", argv[i]) == 0)
         {
-            strcpy(pathSnapshot, argv[i + 1]);
-            break;
+            strcpy(pathSnapshot, argv[i + 1]); // Folder de output pt snapshot
+        }
+        if (strcmp("-x", argv[i]) == 0)
+        {
+            strcpy(pathMalware, argv[i + 1]); // Folder de izolare a fisierelor malitioase
         }
     }
 
@@ -277,7 +339,7 @@ int main(int argc, char *argv[])
     for (int i = 1; i < argc; i++)
     {
         // Ignoră argumentele care nu sunt nume de directoare sau argumentele care reprezintă calea directorului pentru snapshot
-        if (strcmp(argv[i], "-o") != 0 && strcmp(argv[i], pathSnapshot) != 0)
+        if (strcmp(argv[i], "-o") != 0 && strcmp(argv[i], pathSnapshot) != 0 && strcmp(argv[i], "-x") != 0 && strcmp(argv[i], pathMalware) != 0)
         {
             char tempFileName[208];
             strcpy(tempFileName, argv[i]);
@@ -300,16 +362,11 @@ int main(int argc, char *argv[])
     // Așteaptă terminarea tuturor proceselor copil
     for (int i = 1; i < argc; i++)
     {
-        if (strcmp(argv[i], "-o") != 0 && strcmp(argv[i], pathSnapshot) != 0)
+        if (strcmp(argv[i], "-o") != 0 && strcmp(argv[i], pathSnapshot) != 0 && strcmp(argv[i], "-x") != 0 && strcmp(argv[i], pathMalware) != 0)
         {
             int status;
-            pid_t pid = waitpid(-1, &status, 0);
-            if (pid == -1)
-            {
-                perror("Error waiting for child process!\n");
-                exit(EXIT_FAILURE);
-            }
-            else
+            pid_t pid;
+            while ((pid = wait(&status)) > 0)
             {
                 if (WIFEXITED(status))
                 {
@@ -322,6 +379,30 @@ int main(int argc, char *argv[])
             }
         }
     }
+}
 
+int main(int argc, char *argv[])
+{
+    char pathSnapshot[208], pathMalware[208];
+    if (argc < 4)
+    {
+        perror("Not enough arguments!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // Identifică calea directorului pentru snapshot
+    for (int i = 1; i <= argc - 2; i++)
+    {
+        if (strcmp("-o", argv[i]) == 0)
+        {
+            strcpy(pathSnapshot, argv[i + 1]); // Folder de output pt snapshot
+        }
+        if (strcmp("-x", argv[i]) == 0)
+        {
+            strcpy(pathMalware, argv[i + 1]); // Folder de izolare a fisierelor malitioase
+        }
+    }
+
+    // SnapShot(argc,argv); //Creaza SnapShot la fisierele care nu sunt malitioase.
     return 0;
 }
