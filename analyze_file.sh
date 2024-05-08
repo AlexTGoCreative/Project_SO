@@ -2,11 +2,12 @@
 
 analyze_file() {
     file_path="$1"
-    found_keyword=false
+    file_name=$(basename "$file_path")
+    
     # Check if file exists
     if [ ! -f "$file_path" ]; then
         echo "File '$file_path' not found."
-        exit -1
+        exit 1
     fi
 
     # Change file permissions to allow reading
@@ -17,34 +18,31 @@ analyze_file() {
     num_words=$(wc -w < "$file_path")
     num_chars=$(wc -m < "$file_path")
 
-    # Print analysis results
-    echo "File '$file_path' analysis:"
-    echo "Number of lines: $num_lines"
-    echo "Number of words: $num_words"
-    echo "Number of characters: $num_chars"
+    if [ "$num_lines" -lt 3 ] && [ "$num_words" -gt 1000 ] && [ "$num_chars" -gt 2000 ]; then
+        echo "$file_name"
+	chmod -r "$file_path"
+	exit 0
+    fi
     
     # Check for keywords associated with corruption or malicious intent
     keywords=("corrupted" "dangerous" "risk" "attack" "malware" "malicious")
     for keyword in "${keywords[@]}"; do
         if grep -q -i "\<$keyword\>" "$file_path"; then
-            echo "File '$file_path' contains the keyword '$keyword'"
-            found_keyword=true
+            echo "$file_name"
+	    chmod -r "$file_path"
+	    exit 0
         fi
     done
 
     # Check for non-ASCII characters
     if grep -q '[^ -~]' "$file_path"; then
-        echo "File '$file_path' contains non-ASCII characters"
+        echo "$file_name"
 	chmod -r "$file_path"
-        exit 1
+	exit 0
     fi
 
-    if $found_keyword; then
-	chmod -r "$file_path"
-        exit 1 # in this way it prints all the dangerous keywords it encounters
-    fi
 
-    echo "File '$file_path' is safe"
+    echo "SAFE"
     chmod -r "$file_path"
     exit 0
 }
@@ -52,7 +50,7 @@ analyze_file() {
 # Usage: ./analyze_file.sh <file_path>
 if [ $# -ne 1 ]; then
     echo "Usage: $0 <file_path>"
-    exit -1
+    exit 1
 fi
 
 analyze_file "$1"
