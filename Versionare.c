@@ -204,14 +204,7 @@ int compareMetaData(MetaData new, MetaData old)
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
     char directory[MAX_DIRECTORY_NAME];
-    if (output_dir[0] == '\0') // If there is no output_dir
-    {
-        strcpy(directory, dirname(strdup(path))); // I get the name of the dir
-    }
-    else
-    {
-        strcpy(directory, output_dir);
-    }
+    strcpy(directory, output_dir);
 
     // Here i modify the path so that i can use it as a name for the file so that there will be no duplicates when i give multiple direcotires
     for (int i = 0; path[i] != '\0'; i++)
@@ -277,7 +270,7 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
 
     if (pid < 0)
     {
-        perror("fork");
+        perror("fork_nephew");
         exit(-1);
     }
     else if (pid == 0)
@@ -309,9 +302,11 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
 
         int status;
         char buffer[BUFFER_SIZE];
-        //wait(&status);
+
+        //wait(&status); //both work, it seems clearer to me with waitpid
         waitpid(pid, &status, 0);
-        if (WIFEXITED(status)) //Did the execution of the child end successfully?
+
+        if (WIFEXITED(status)) //Did the execution of the child end successfully ?
         {
             if (WEXITSTATUS(status) == 0) //I check what my child "returned"
             {
@@ -368,6 +363,8 @@ int verifyType(char *DirectoryName)
 
 void readDir(char *path, char *output_dir, char *izolated_space_dir, int *dangerous_files)
 {
+    //path = folder location
+
     DIR *dir = opendir(path);
     if (dir == NULL)
     {
@@ -382,7 +379,7 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
         if (dirData->d_name[0] == '.')
             continue;
 
-        if (strstr(dirData->d_name, "_snapshot.txt")) // Skip the snapshots
+        if (strstr(dirData->d_name, "_snapshot.txt")) // Skip the snapshots, theoretically there should not be such a file in the folder
             continue;
 
         char pathCurrent[257];
@@ -442,14 +439,7 @@ int checkDirectories(char **argv, int argc, int start, char dirNames[MAX_NUMBER_
     for (int i = start; i < argc; i++)
         if (strcmp(argv[i], izolated_space_dir) != 0 && strcmp(argv[i], output_dir) != 0 && strcmp(argv[i], "-o") != 0 && strcmp(argv[i], "-x") != 0)
         {
-            struct stat argv_stat;
-            if (lstat(argv[i], &argv_stat) == -1)
-            {
-                perror("Stat failed\n");
-                exit(-3);
-            }
-
-            if (S_ISDIR(argv_stat.st_mode))
+            if (verifyType(argv[i]))
             {
                 if (number_directories == MAX_NUMBER_OF_DIRECTORIES) // Check if there are more directories than maximum number
                 {
@@ -470,7 +460,6 @@ int checkDirectories(char **argv, int argc, int start, char dirNames[MAX_NUMBER_
                 }
             }
         }
-
     return number_directories;
 }
 
@@ -484,21 +473,21 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc - 1; i++)
         if (strcmp(argv[i], "-o") == 0)
         {
-            strcpy(output_dir, argv[i + 1]);
+            strcpy(output_dir, argv[i + 1]); 
         }
         else if (strcmp(argv[i], "-x") == 0)
         {
             strcpy(izolated_space_dir, argv[i + 1]);
         }
     
-    number_directories = checkDirectories(argv, argc, 1, dirNames,izolated_space_dir,output_dir); //Verific argumentele din linia de comanda
-
+    number_directories = checkDirectories(argv, argc, 1, dirNames,izolated_space_dir,output_dir); //I check the command line arguments
+    
     for (int i = 0; i < number_directories; i++)
     {
         pid_t pid = fork();
         if (pid == -1)
         {
-            perror("fork");
+            perror("fork_son");
             exit(-1);
         }
         else if (pid == 0)
@@ -516,7 +505,6 @@ int main(int argc, char **argv)
     {
         int status;
         pid_t child_pid = wait(&status);
-
         if (WIFEXITED(status))
         {
             printf("\nChild Process %d terminated with PID %d and with %d potentially dangerous files.\n", i + 1, child_pid, WEXITSTATUS(status));
