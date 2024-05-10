@@ -10,6 +10,7 @@
 #include <libgen.h>
 #include <fcntl.h>
 
+#define MAX_PERMISSIONS S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH
 #define MAX_NUMBER_OF_DIRECTORIES 10
 #define MAX_DIRECTORY_NAME 50
 #define MAX_FILE_NAME 100
@@ -275,7 +276,7 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
     }
     // Snapshot does not exist
 
-    int snapshot_file = open(output_file_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    int snapshot_file = open(output_file_path, O_WRONLY | O_CREAT | O_TRUNC, MAX_PERMISSIONS);
     if (snapshot_file == -1)
     {
         perror("Snapshot create error\n");
