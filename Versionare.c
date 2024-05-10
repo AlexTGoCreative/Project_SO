@@ -231,6 +231,7 @@ int compareMetaData(MetaData new, MetaData old)
 
 
 
+
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
     char directory[MAX_DIRECTORY_NAME];
