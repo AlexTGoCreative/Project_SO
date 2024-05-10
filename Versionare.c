@@ -46,10 +46,6 @@ int verifyType(char *DirectoryName);                                            
 
 void printMetaData(MetaData metadata, int fd)
 {
-    // Makes the output stdout if i don't give it a file
-    if (fd == 0)
-        fd = STDOUT_FILENO;
-
     char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
     int n;                    // Variable to store number of bytes written
 
@@ -219,18 +215,14 @@ int compareMetaData(MetaData new, MetaData old)
 {
     if (strcmp(new.name, old.name))
         return 1;
-
     if (new.size != old.size)
         return 1;
     if (new.inode != old.inode)
         return 1;
     if (strcmp(new.permissions, old.permissions))
         return 1;
-
     return 0;
 }
-
-
 
 
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
