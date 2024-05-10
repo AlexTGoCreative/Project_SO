@@ -146,6 +146,34 @@ MetaData makeMetaData(char *path, struct dirent *dirData)
     return metadata;
 }
 
+ssize_t read_line(int fd, char *buffer, size_t n) {
+    ssize_t num_read;  // numărul de octeți citiți de read
+    size_t total_read = 0;  // numărul total de octeți citiți
+    char ch;
+
+    if (n <= 0 || buffer == NULL) {
+        return -1;
+    }
+
+    while (total_read < n - 1) {  // -1 pentru a lăsa loc pentru terminatorul de șir
+        num_read = read(fd, &ch, 1);  // citim un singur caracter
+
+        if (num_read == 1) {  // am citit cu succes un caracter
+            if (ch == '\n') {  // dacă am întâlnit un newline, ieșim din buclă
+                break;
+            }
+            buffer[total_read++] = ch;  // adăugăm caracterul în buffer
+        } else if (num_read == 0) {  // am ajuns la EOF
+            break;
+        } else {  // eroare la citire
+            return -1;
+        }
+    }
+
+    buffer[total_read] = '\0';  // adăugăm terminatorul de șir
+    return total_read;  // returnăm numărul de caractere citite
+}
+
 MetaData parseMetaDataFromFile(const char *file_path)
 {
     MetaData metadata;
@@ -158,7 +186,7 @@ MetaData parseMetaDataFromFile(const char *file_path)
 
     char line[BUFFER_SIZE];
     ssize_t bytes_read;
-    while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) // Reads a BUFFER_SIZE chunck from the file
+    while ((bytes_read = read_line(file_descriptor, line, sizeof(line))) > 0) // Reads a BUFFER_SIZE chunck from the file
     {
         // check each line for the relevant data
         if (strncmp(line, "Name:", 5) == 0)
@@ -201,6 +229,8 @@ int compareMetaData(MetaData new, MetaData old)
     return 0;
 }
 
+
+
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
     char directory[MAX_DIRECTORY_NAME];
@@ -235,7 +265,7 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
                 perror("open snapshot");
                 exit(-4);
             }
-
+            //printf("S-a modificat\n");
             printMetaData(metadata, file_descriptor);
             close(file_descriptor);
         }
