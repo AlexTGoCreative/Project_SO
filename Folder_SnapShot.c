@@ -36,7 +36,7 @@ int checkDirectories(char **argv, int argc, int start, char dirNames[MAX_NUMBER_
 void readDir(char *path, char *output_dir, char *izolated_space_dir, int *dangerous_files);                           // Opens the directory and reads all the files
 MetaData makeMetaData(char *path, struct dirent *dirData);                                                            // Returns a MetaData from the file's path given
 void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode,int index);                                                   // Makes the snapshot file or updates the already existing one if there are changes
-MetaData parseMetaDataFromFile(const char *file_path,int index, int offset);                                                                // Returns a MetaData from a given file
+MetaData parseMetaDataFromFile(const char *file_path,int index);                                                                // Returns a MetaData from a given file
 int compareMetaData(MetaData new, MetaData old);                                                                      // Compares two metadatas
 void printMetaData(MetaData metadata, int fd);                                                                        // Prints the metadata in the given file, if there is none given it will print to stdout
 char *permissionToString(mode_t mode);                                                                                // Returns a human-readable string with the file permissions
@@ -84,65 +84,13 @@ void printMetaData(MetaData metadata, int fd)
         exit(-6);
     }
 
-    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n\n\n", metadata.permissions);
+    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n", metadata.permissions);
     if (write(fd, buffer, n) == -1)
     {
         perror("Write failed\n");
         exit(-6);
     }
 }
-
-
-void printMetaData_index(MetaData metadata, int fd,int index, int offset)
-{
-    lseek(fd, index * offset, SEEK_SET);
-
-    char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
-    int n;                    // Variable to store number of bytes written
-
-    n = snprintf(buffer, sizeof(buffer), "Path: %s\n", metadata.path);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-
-    n = snprintf(buffer, sizeof(buffer), "Name: %s\n", metadata.name);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-
-    n = snprintf(buffer, sizeof(buffer), "Size: %ld bytes\n", metadata.size);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-
-    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.modifiedChar);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-
-    n = snprintf(buffer, sizeof(buffer), "Inode: %lu\n", metadata.inode);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-
-    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n\n\n", metadata.permissions);
-    if (write(fd, buffer, n) == -1)
-    {
-        perror("Write failed\n");
-        exit(-6);
-    }
-}
-
 
 char *permissionToString(mode_t mode)
 {
@@ -222,7 +170,92 @@ ssize_t read_line(int fd, char *buffer, size_t n) {
     return total_read;  // returnăm numărul de caractere citite
 }
 
-MetaData parseMetaDataFromFile(const char *file_path, int index,int offset)
+void moveCursorToNthPath(int fd, int N) {
+    char buffer[BUFFER_SIZE]; // Buffer pentru citirea din fișier
+    char *word;
+    int bytesRead;
+    int count = 0;
+    off_t position;
+    
+    // Salvează poziția curentă a cursorului
+    position = lseek(fd, 0, SEEK_CUR);
+    
+    // Întoarce cursorul la începutul fișierului
+    lseek(fd, 0, SEEK_SET);
+    
+    while ((bytesRead = read(fd, buffer, sizeof(buffer))) > 0) {
+        // Parcurge bufferul pentru a găsi aparițiile cuvântului "Path"
+        word = strtok(buffer, " \t\n"); // Separa cuvintele după spații, tab-uri și newline-uri
+        
+        while (word != NULL) {
+            if (strcmp(word, "Path") == 0) {
+                count++;
+                if (count == N) {
+                    // Găsit cea de-a N-a apariție a cuvântului "Path", mută cursorul la începutul cuvântului
+                    lseek(fd, -(strlen(word) + 1), SEEK_CUR); // Se adaugă 1 pentru a compensa spațiul/tabul/newline-ul
+                    return;
+                }
+            }
+            word = strtok(NULL, " \t\n");
+        }
+    }
+    
+    if (count < N) {
+        // Dacă nu au fost găsite suficiente apariții ale cuvântului "Path", se revine la poziția inițială
+        lseek(fd, position, SEEK_SET);
+    }
+}
+
+void printMetaData_index(MetaData metadata, int fd,int index)
+{
+    moveCursorToNthPath(fd,index);
+    char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
+    int n;                    // Variable to store number of bytes written
+
+    n = snprintf(buffer, sizeof(buffer), "Path: %s\n", metadata.path);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Name: %s\n", metadata.name);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Size: %ld bytes\n", metadata.size);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.modifiedChar);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Inode: %lu\n", metadata.inode);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n", metadata.permissions);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+}
+
+MetaData parseMetaDataFromFile(const char *file_path, int index)
 {
     MetaData metadata;
     int file_descriptor = open(file_path, O_RDONLY);
@@ -232,11 +265,12 @@ MetaData parseMetaDataFromFile(const char *file_path, int index,int offset)
         exit(-5);
     }
     
-    lseek(file_descriptor, index * offset, SEEK_SET);
+    moveCursorToNthPath(file_descriptor,index);
 
     char line[BUFFER_SIZE];
     ssize_t bytes_read;
-    while ((bytes_read = read_line(file_descriptor, line, offset) > 0)) // Reads a line from the file
+    int ok = 0;
+    while ((bytes_read = read_line(file_descriptor, line, BUFFER_SIZE) > 0) && ok == 0) // Reads a line from the file
     {
         // check each line for the relevant data
         if (strncmp(line, "Name:", 5) == 0)
@@ -254,6 +288,7 @@ MetaData parseMetaDataFromFile(const char *file_path, int index,int offset)
         else if (strncmp(line, "Permissions:", 12) == 0)
         {
             sscanf(line, "Permissions: %[^\n]", metadata.permissions);
+            ok = 1;
         }
     }
 
@@ -266,6 +301,7 @@ MetaData parseMetaDataFromFile(const char *file_path, int index,int offset)
 
 int compareMetaData(MetaData new, MetaData old)
 {
+    printf("%s   |   %s\n\n\n\n", new.name,old.name);
     if (strcmp(new.name, old.name))
         return 1;
     if (new.size != old.size)
@@ -291,10 +327,7 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode,in
     if (lstat(output_file_path, &file_stat) == 0)
     {
         // Snapshot exists
-        char data[512];
-
-        sprintf(data,"Path: %s\nName: %s\nSize: %ld bytes\nLast Modified: %s\nInode: %lu\nPermissions: %s\n\n\n",metadata.path,metadata.name,metadata.size,metadata.modifiedChar,metadata.inode,metadata.permissions);
-        MetaData newMetaData = parseMetaDataFromFile(output_file_path,index,strlen(data));
+        MetaData newMetaData = parseMetaDataFromFile(output_file_path,index);
         if (compareMetaData(newMetaData, metadata) != 0) // There are changes
         {
             int file_descriptor = open(output_file_path, O_WRONLY | O_APPEND);
@@ -303,11 +336,9 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode,in
                 perror("open snapshot");
                 exit(-4);
             }
-            printf("Modificari");
-            printMetaData_index(metadata, file_descriptor,index,strlen(data));
+            printMetaData_index(metadata, file_descriptor,index);
             close(file_descriptor);
         }
-
         return;
     }
     // Snapshot does not exist
@@ -464,11 +495,11 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
     }
 
     struct dirent *dirData;
-    int index = 0;
+    int index = 1;
 
     while ((dirData = readdir(dir)) != NULL)
     {
-        if (dirData->d_name[0] == '.')
+        if ((strcmp(dirData->d_name, ".") == 0) || (strcmp(dirData->d_name, "..") == 0))
             continue;
 
         if (strstr(dirData->d_name, "_snapshot.txt")) // Skip the snapshots, theoretically there should not be such a file in the folder
@@ -513,6 +544,7 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
             {
                 MetaData metadata = makeMetaData(pathCurrent, dirData);
                 makeSnapshot(pathCurrent, metadata, output_dir,get_directory_inode(path),index);
+                //printf("SNAP%d\n\n\n",index);
                 index++;
             }
         }
@@ -589,7 +621,7 @@ int main(int argc, char **argv)
             // Child process
             int dangerous_files = 0;
             readDir(dirNames[i], output_dir, izolated_space_dir, &dangerous_files); // Arguments are well given
-            printf("\nSnapshot for %s created successfully.\n", dirNames[i]);
+            //printf("\nSnapshot for %s created successfully.\n", dirNames[i]);
             exit(dangerous_files);
         }
     }
@@ -601,11 +633,11 @@ int main(int argc, char **argv)
         pid_t child_pid = wait(&status);
         if (WIFEXITED(status))
         {
-            printf("\nChild Process %d terminated with PID %d and with %d potentially dangerous files.\n", i + 1, child_pid, WEXITSTATUS(status));
+            //printf("\nChild Process %d terminated with PID %d and with %d potentially dangerous files.\n", i + 1, child_pid, WEXITSTATUS(status));
         }
         else
         {
-            printf("\nChild Process %d with PID %d did not exit normally.\n", i + 1, child_pid);
+            //printf("\nChild Process %d with PID %d did not exit normally.\n", i + 1, child_pid);
         }
     }
 
