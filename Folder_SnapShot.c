@@ -35,8 +35,8 @@ typedef struct
 int checkDirectories(char **argv, int argc, int start, char dirNames[MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME] , char izolated_space_dir[MAX_DIRECTORY_NAME] , char output_dir[MAX_DIRECTORY_NAME]); // Check if the directories given resepect the requirements, puts their names in dirNames and returns the number of directories
 void readDir(char *path, char *output_dir, char *izolated_space_dir, int *dangerous_files);                           // Opens the directory and reads all the files
 MetaData makeMetaData(char *path, struct dirent *dirData);                                                            // Returns a MetaData from the file's path given
-void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode);                                                   // Makes the snapshot file or updates the already existing one if there are changes
-MetaData parseMetaDataFromFile(const char *file_path);                                                                // Returns a MetaData from a given file
+void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode,int index);                                                   // Makes the snapshot file or updates the already existing one if there are changes
+MetaData parseMetaDataFromFile(const char *file_path,int index, int offset);                                                                // Returns a MetaData from a given file
 int compareMetaData(MetaData new, MetaData old);                                                                      // Compares two metadatas
 void printMetaData(MetaData metadata, int fd);                                                                        // Prints the metadata in the given file, if there is none given it will print to stdout
 char *permissionToString(mode_t mode);                                                                                // Returns a human-readable string with the file permissions
@@ -92,6 +92,58 @@ void printMetaData(MetaData metadata, int fd)
     }
 }
 
+
+void printMetaData_index(MetaData metadata, int fd,int index, int offset)
+{
+    lseek(fd, index * offset, SEEK_SET);
+
+    char buffer[BUFFER_SIZE]; // Buffer to hold formatted strings
+    int n;                    // Variable to store number of bytes written
+
+    n = snprintf(buffer, sizeof(buffer), "Path: %s\n", metadata.path);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Name: %s\n", metadata.name);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Size: %ld bytes\n", metadata.size);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.modifiedChar);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Inode: %lu\n", metadata.inode);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n\n\n", metadata.permissions);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+}
+
+
 char *permissionToString(mode_t mode)
 {
     static char perm[10];
@@ -142,7 +194,35 @@ MetaData makeMetaData(char *path, struct dirent *dirData)
     return metadata;
 }
 
-MetaData parseMetaDataFromFile(const char *file_path)
+ssize_t read_line(int fd, char *buffer, size_t n) {
+    ssize_t num_read;  // numărul de octeți citiți de read
+    size_t total_read = 0;  // numărul total de octeți citiți
+    char ch;
+
+    if (n <= 0 || buffer == NULL) {
+        return -1;
+    }
+
+    while (total_read < n - 1) {  // -1 pentru a lăsa loc pentru terminatorul de șir
+        num_read = read(fd, &ch, 1);  // citim un singur caracter
+
+        if (num_read == 1) {  // am citit cu succes un caracter
+            if (ch == '\n') {  // dacă am întâlnit un newline, ieșim din buclă
+                break;
+            }
+            buffer[total_read++] = ch;  // adăugăm caracterul în buffer
+        } else if (num_read == 0) {  // am ajuns la EOF
+            break;
+        } else {  // eroare la citire
+            return -1;
+        }
+    }
+
+    buffer[total_read] = '\0';  // adăugăm terminatorul de șir
+    return total_read;  // returnăm numărul de caractere citite
+}
+
+MetaData parseMetaDataFromFile(const char *file_path, int index,int offset)
 {
     MetaData metadata;
     int file_descriptor = open(file_path, O_RDONLY);
@@ -151,10 +231,12 @@ MetaData parseMetaDataFromFile(const char *file_path)
         perror("open");
         exit(-5);
     }
+    
+    lseek(file_descriptor, index * offset, SEEK_SET);
 
     char line[BUFFER_SIZE];
     ssize_t bytes_read;
-    while ((bytes_read = read(file_descriptor, line, sizeof(line))) > 0) // Reads a BUFFER_SIZE chunck from the file
+    while ((bytes_read = read_line(file_descriptor, line, offset) > 0)) // Reads a line from the file
     {
         // check each line for the relevant data
         if (strncmp(line, "Name:", 5) == 0)
@@ -186,7 +268,6 @@ int compareMetaData(MetaData new, MetaData old)
 {
     if (strcmp(new.name, old.name))
         return 1;
-
     if (new.size != old.size)
         return 1;
     if (new.inode != old.inode)
@@ -197,19 +278,10 @@ int compareMetaData(MetaData new, MetaData old)
     return 0;
 }
 
-void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode)
+void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode,int index)
 {
     char directory[MAX_DIRECTORY_NAME];
     strcpy(directory, output_dir);
-
-    // Here i modify the path so that i can use it as a name for the file so that there will be no duplicates when i give multiple direcotires
-    for (int i = 0; path[i] != '\0'; i++)
-    {
-        if (path[i] == '/')
-        {
-            path[i] = '-';
-        }
-    }
 
     char output_file_path[strlen(directory) + 21];  //20 - inode + 1 - '\0'
     sprintf(output_file_path, "%s/%ld_Snapshots.txt", directory, inode);
@@ -219,7 +291,10 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode)
     if (lstat(output_file_path, &file_stat) == 0)
     {
         // Snapshot exists
-        MetaData newMetaData = parseMetaDataFromFile(output_file_path);
+        char data[512];
+
+        sprintf(data,"Path: %s\nName: %s\nSize: %ld bytes\nLast Modified: %s\nInode: %lu\nPermissions: %s\n\n\n",metadata.path,metadata.name,metadata.size,metadata.modifiedChar,metadata.inode,metadata.permissions);
+        MetaData newMetaData = parseMetaDataFromFile(output_file_path,index,strlen(data));
         if (compareMetaData(newMetaData, metadata) != 0) // There are changes
         {
             int file_descriptor = open(output_file_path, O_WRONLY | O_APPEND);
@@ -228,8 +303,8 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir,ino_t inode)
                 perror("open snapshot");
                 exit(-4);
             }
-
-            printMetaData(metadata, file_descriptor);
+            printf("Modificari");
+            printMetaData_index(metadata, file_descriptor,index,strlen(data));
             close(file_descriptor);
         }
 
@@ -369,6 +444,14 @@ ino_t get_directory_inode(const char *path)
     }
 }
 
+void deleteContentFromPosition(int fd, off_t offset) {
+    // Setează cursorul la poziția specificată
+    lseek(fd, offset, SEEK_SET);
+    
+    // Șterge conținutul de la poziția curentă până la sfârșitul fișierului
+    ftruncate(fd, offset);
+}
+
 void readDir(char *path, char *output_dir, char *izolated_space_dir, int *dangerous_files)
 {
     //path = folder location
@@ -381,6 +464,7 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
     }
 
     struct dirent *dirData;
+    int index = 0;
 
     while ((dirData = readdir(dir)) != NULL)
     {
@@ -417,7 +501,8 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
                 {
                     // It is not dangerous
                     MetaData metadata = makeMetaData(pathCurrent, dirData);
-                    makeSnapshot(pathCurrent, metadata, output_dir,get_directory_inode(path));
+                    makeSnapshot(pathCurrent, metadata, output_dir,get_directory_inode(path),index);
+                    index++;
                 }
                 else
                 {
@@ -427,7 +512,8 @@ void readDir(char *path, char *output_dir, char *izolated_space_dir, int *danger
             else
             {
                 MetaData metadata = makeMetaData(pathCurrent, dirData);
-                makeSnapshot(pathCurrent, metadata, output_dir,get_directory_inode(path));
+                makeSnapshot(pathCurrent, metadata, output_dir,get_directory_inode(path),index);
+                index++;
             }
         }
     }
