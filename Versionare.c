@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <libgen.h>
 #include <fcntl.h>
+#include <sys/time.h>
 
 #define MAX_PERMISSIONS S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH
 #define MAX_NUMBER_OF_DIRECTORIES 10
@@ -18,6 +19,7 @@
 #define MAX_PERMISSIONS_LENGTH 50
 #define MAX_PATH_LENGTH 100
 #define BUFFER_SIZE 512
+#define MAX_TIME_LENGHT 30
 
 typedef struct
 {
@@ -27,10 +29,13 @@ typedef struct
     time_t modified; // Time of last modification //
     ino_t inode;
     mode_t mode;                            // File type and mode //
-    char modifiedChar[MAX_MODIFIED_LENGTH]; // the modified field in human-readable format
+    char LastModifiedTime[MAX_MODIFIED_LENGTH]; // the modified field in human-readable format Time and Date
     char permissions[MAX_PERMISSIONS_LENGTH];
     char path[MAX_PATH_LENGTH];
+    char CreationTime[MAX_TIME_LENGHT];
 } MetaData;
+
+char Start_Time[30];
 
 int checkDirectories(char **argv, int argc, int start, char dirNames[MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME] , char izolated_space_dir[MAX_DIRECTORY_NAME] , char output_dir[MAX_DIRECTORY_NAME]); // Check if the directories given resepect the requirements, puts their names in dirNames and returns the number of directories
 void readDir(char *path, char *output_dir, char *izolated_space_dir, int *dangerous_files);                           // Opens the directory and reads all the files
@@ -42,6 +47,10 @@ void printMetaData(MetaData metadata, int fd);                                  
 char *permissionToString(mode_t mode);                                                                                // Returns a human-readable string with the file permissions
 int analyze_file(char *pathCurrent, char *izolated_space_dir);                                                        // Executes the script and moves the file if it is dangerous
 int verifyType(char *DirectoryName);                                                                                  // Check if the argument is a directory
+ssize_t read_line(int fd, char *buffer, size_t n);                                                                    // Read one line at a time from the file
+ino_t get_inode(const char *path);                                                                                    // Get the inode of a file
+void DeleteFile(const char *path);                                                                                    // Used to delete file from Output Dir
+void VerifyOutputDir(char *output_dir);                                                                               // Verify Output Dir to see if there are "junks" from previos 
 
 
 void printMetaData(MetaData metadata, int fd)
@@ -70,7 +79,7 @@ void printMetaData(MetaData metadata, int fd)
         exit(-6);
     }
 
-    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.modifiedChar);
+    n = snprintf(buffer, sizeof(buffer), "Last Modified: %s\n", metadata.LastModifiedTime);
     if (write(fd, buffer, n) == -1)
     {
         perror("Write failed\n");
@@ -85,6 +94,13 @@ void printMetaData(MetaData metadata, int fd)
     }
 
     n = snprintf(buffer, sizeof(buffer), "Permissions: %s\n", metadata.permissions);
+    if (write(fd, buffer, n) == -1)
+    {
+        perror("Write failed\n");
+        exit(-6);
+    }
+
+    n = snprintf(buffer, sizeof(buffer), "Creation time: %s\n", metadata.CreationTime);
     if (write(fd, buffer, n) == -1)
     {
         perror("Write failed\n");
@@ -132,13 +148,14 @@ MetaData makeMetaData(char *path, struct dirent *dirData)
     char modified_time_str[26];
     strftime(modified_time_str, 26, "%Y-%m-%d %H:%M:%S", tm_info);
 
-    strcpy(metadata.modifiedChar, modified_time_str);
+    strcpy(metadata.LastModifiedTime, modified_time_str);
 
     mode_t permissions = statData.st_mode & 0777;
     char *permission_str = permissionToString(permissions);
     strcpy(metadata.permissions, permission_str);
 
     strcpy(metadata.path, path);
+    strcpy(metadata.CreationTime, Start_Time);
 
     return metadata;
 }
@@ -202,9 +219,13 @@ MetaData parseMetaDataFromFile(const char *file_path)
         {
             sscanf(line, "Permissions: %[^\n]", metadata.permissions);
         }
+        else if (strncmp(line, "Creation time:", 14) == 0)
+        {
+            sscanf(line, "Creation time: %[^\n]", metadata.CreationTime);
+        }
     }
 
-    strcpy(metadata.modifiedChar, "x"); // I don't care for this when i compare the two metadas
+    strcpy(metadata.LastModifiedTime, "x"); // I don't care for this when i compare the two metadas
     strcpy(metadata.path, file_path);
 
     close(file_descriptor);
@@ -224,9 +245,25 @@ int compareMetaData(MetaData new, MetaData old)
     return 0;
 }
 
+ino_t get_inode(const char *path)
+{
+    struct stat info;
+
+    if (lstat(path, &info) != -1)
+    {
+        return info.st_ino;
+    }
+    else
+    {
+        perror("stat");
+        exit(EXIT_FAILURE);
+    }
+}
 
 void makeSnapshot(char *path, MetaData metadata, char *output_dir)
 {
+    
+    /*
     char directory[MAX_DIRECTORY_NAME];
     strcpy(directory, output_dir);
 
@@ -238,12 +275,21 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
             path[i] = '-';
         }
     }
+    
 
     char snapshot_char[MAX_FILE_NAME] = "/";
     strcat(snapshot_char, path);
     strcat(snapshot_char, "_snapshot.txt");
     char output_file_path[strlen(directory) + strlen(snapshot_char) + 1];
     sprintf(output_file_path, "%s%s", directory, snapshot_char); // The output_file_path has the following format path/path-name_of_file_snapshot.txt
+    */
+
+
+    char directory[MAX_DIRECTORY_NAME];
+    strcpy(directory, output_dir);
+
+    char output_file_path[strlen(directory) + 21];  //20 - inode + 1 - '\0'
+    sprintf(output_file_path, "%s/%ld_Snapshots.txt", directory, get_inode(path));
 
     // Check if the snapshot exists
     struct stat file_stat;
@@ -253,16 +299,18 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
         MetaData newMetaData = parseMetaDataFromFile(output_file_path);
         if (compareMetaData(newMetaData, metadata) != 0) // There are changes
         {
-            int file_descriptor = open(output_file_path, O_WRONLY);
-            if (file_descriptor == -1)
-            {
-                perror("open snapshot");
-                exit(-4);
-            }
-            //printf("S-a modificat\n");
-            printMetaData(metadata, file_descriptor);
-            close(file_descriptor);
+            printf("The file \"%s\" was successfully modified. \n",newMetaData.path);
         }
+
+        int file_descriptor = open(output_file_path, O_WRONLY);
+        if (file_descriptor == -1)
+        {
+            perror("open snapshot");
+            exit(-4);
+        }
+        // printf("S-a modificat\n");
+        printMetaData(metadata, file_descriptor);
+        close(file_descriptor);
 
         return;
     }
@@ -278,6 +326,44 @@ void makeSnapshot(char *path, MetaData metadata, char *output_dir)
     printMetaData(metadata, snapshot_file);
 
     close(snapshot_file);
+}
+
+void DeleteFile(const char *path) {
+
+    if (remove(path) == 0) {
+        printf("The file \"%s\" was successfully deleted.\n", path);
+    } else {
+        printf("Could not delete file \"%s\".\n", path);
+    }
+
+}
+
+void VerifyOutputDir(char *output_dir)
+{
+    DIR *dir = opendir(output_dir);
+    if (dir == NULL)
+    {
+        perror("Dir open error");
+        exit(-1);
+    }
+
+    struct dirent *dirData;
+
+    while ((dirData = readdir(dir)) != NULL)
+    {
+        if (dirData->d_name[0] == '.')
+            continue;
+
+        char pathCurrent[257];
+        sprintf(pathCurrent, "%s/%s", output_dir, dirData->d_name);
+
+        MetaData newMetaData = parseMetaDataFromFile(pathCurrent);
+        if(strcmp(newMetaData.CreationTime,Start_Time))
+        {
+            DeleteFile(pathCurrent);
+            //remove(pathCurrent);
+        }
+   }
 }
 
 int analyze_file(char *pathCurrent, char *izolated_space_dir)
@@ -352,6 +438,8 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
                 char *last_slash = strrchr(pathCurrent, '/');
                 char *file_name = (last_slash != NULL) ? last_slash + 1 : pathCurrent;
                 char new_file_path[MAX_FILE_NAME];
+                char new_path[MAX_FILE_NAME];
+                strcpy(new_path,pathCurrent);
                 snprintf(new_file_path, sizeof(new_file_path), "%s/%s", izolated_space_dir, file_name);
 
                 // Move the file to the directory
@@ -360,6 +448,8 @@ int analyze_file(char *pathCurrent, char *izolated_space_dir)
                     perror("rename");
                     exit(-4);
                 }
+
+                printf("The file \"%s\" is a threat and has been successfully isolated\n",new_path);
 
                 return 1;
             }
@@ -494,6 +584,12 @@ int main(int argc, char **argv)
     char izolated_space_dir[MAX_DIRECTORY_NAME];
     char dirNames[MAX_NUMBER_OF_DIRECTORIES][MAX_DIRECTORY_NAME];
 
+    //Calculam timpul de lansare in executie
+
+    struct timeval Start;
+    gettimeofday(&Start,NULL);
+    strftime(Start_Time, 30, "%Y-%m-%d %H:%M:%S", localtime(&Start.tv_sec));
+
     for (int i = 1; i < argc - 1; i++)
         if (strcmp(argv[i], "-o") == 0)
         {
@@ -520,6 +616,7 @@ int main(int argc, char **argv)
             int dangerous_files = 0;
             readDir(dirNames[i], output_dir, izolated_space_dir, &dangerous_files); // Arguments are well given
             printf("\nSnapshot for %s created successfully.\n", dirNames[i]);
+            //printf("%s\n", Start_Time);
             exit(dangerous_files);
         }
     }
@@ -538,6 +635,8 @@ int main(int argc, char **argv)
             printf("\nChild Process %d with PID %d did not exit normally.\n", i + 1, child_pid);
         }
     }
+
+    VerifyOutputDir(output_dir);
 
     return 0;
 }
